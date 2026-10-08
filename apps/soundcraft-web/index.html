@@ -12,6 +12,43 @@
     #soundcraft_loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
       color: #b8b8b8; font: 14px system-ui, sans-serif; pointer-events: none; }
   </style>
+  <script>
+    // Autoplay policy: browsers refuse to start an AudioContext that was created before a
+    // user gesture. The WASM audio backend (cpal's wasm-bindgen backend) builds its
+    // AudioContext during app startup, so it stays suspended and playback is silent.
+    // Wrap the constructor so every AudioContext the app creates is tracked, and resume
+    // all suspended contexts on the first click, tap or keypress.
+    (function () {
+      var NativeAudioContext = window.AudioContext;
+      if (typeof NativeAudioContext !== "function") return;
+      var suspendedContexts = new Set();
+      function track(ctx) {
+        var sync = function () {
+          if (ctx.state === "suspended") suspendedContexts.add(ctx);
+          else suspendedContexts.delete(ctx);
+        };
+        ctx.addEventListener("statechange", sync);
+        sync();
+      }
+      var resumeAll = function () {
+        suspendedContexts.forEach(function (ctx) {
+          if (ctx.state === "suspended") {
+            ctx.resume().catch(function () {});
+          }
+        });
+      };
+      var PatchedAudioContext = function AudioContext() {
+        var ctx = Reflect.construct(NativeAudioContext, arguments);
+        track(ctx);
+        return ctx;
+      };
+      PatchedAudioContext.prototype = NativeAudioContext.prototype;
+      window.AudioContext = PatchedAudioContext;
+      ["pointerdown", "keydown", "touchstart"].forEach(function (type) {
+        window.addEventListener(type, resumeAll, { capture: true, passive: true });
+      });
+    })();
+  </script>
 </head>
 <body>
   <canvas id="soundcraft_canvas"></canvas>
